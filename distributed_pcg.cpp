@@ -15,8 +15,6 @@ public:
   typedef std::pair<int,int>   N2;
 
   std::map<N2,double>  data;
-  int nbrow;
-  int nbcol;
 
   // using m, n for the spmat structure to differentiate for now 
   int rows, cols; // m=num rows, n = num columns 
@@ -27,11 +25,9 @@ public:
 
 public:
   MapMatrix(const int& nr, const int& nc):
-    // nbrow(nr), nbcol(nc) {}; 
     rows(nr), cols(nc) {};
 
   MapMatrix(const MapMatrix& m): 
-    // nbrow(m.nbrow), nbcol(m.nbcol), data(m.data) {}; 
     rows(m.mrows()), cols(m.ncols()) {}; 
   
   MapMatrix& operator=(const MapMatrix& m){ 
@@ -44,9 +40,6 @@ public:
   }
   int mrows() const {return rows;}
   int ncols() const {return cols;}
-
-  // int NbRow() const {return nbrow;}
-  // int NbCol() const {return nbcol;}
 
   void insert(int i, int j, double val) {
     V.push_back(val); 
@@ -71,6 +64,7 @@ public:
   }
 
   // parallel matrix-vector product with distributed vector xi
+  // Operator from starter code:
   // std::vector<double> operator*(const std::vector<double>& xi) const {
 
   //   std::vector<double> x(NbCol());
@@ -88,19 +82,8 @@ public:
   //   return b;
   // }
 
+  // Operator for our updated class:
   std::vector<double> operator*(const std::vector<double>& xi) const {
-    // std::vector<double> x(NbCol());
-    // std::copy(xi.begin(),xi.end(),x.begin());
-    // std::vector<double> b(NbRow(),0.);
-    // for(auto it=data.begin(); it!=data.end(); ++it){
-    //   int j = (it->first).first;
-    //   int k = (it->first).second; 
-    //   double Mjk = it->second;
-    //   b[j] += Mjk*x[k];
-    // }
-
-    // return b;
-    
     // A*x where A is mxn and x is nx1 
     // CSR format has length m+1 (last element is NNZ) from wikipedia pg on CSR 
     std::vector<double> result(row_ptrs.size() - 1, 0.0); 
@@ -115,8 +98,6 @@ public:
       }
     }
     return result; 
-
-
 
   }
 };
@@ -199,7 +180,6 @@ void CG(const MapMatrix& A,
   std::vector<double> r=b, z=prec(P,r), p=z, Ap=A*p;
   double np2=(p,Ap), alpha=0.,beta=0.;
   double nr = sqrt((z,r));
-  double epsilon = tol*nr;
 
   std::vector<double> res = A*x;
   res += (-1)*b;
