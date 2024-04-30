@@ -32,8 +32,8 @@ public:
   
   MapMatrix& operator=(const MapMatrix& m){ 
     if(this!=&m){
-      nbrow=m.nbrow;
-      nbcol=m.nbcol;
+      rows=m.rows;
+      cols=m.cols;
       data=m.data;
     }   
     return *this; 
@@ -92,14 +92,31 @@ public:
     for (int i=0; i < rows; i++) {
       // this is k=row_ptrs[i] to row_ptrs[i+1] - 1
       for (int k=row_ptrs[i]; k < row_ptrs[i+1]; k++) {
-        result[i] += values[k] * xi[col_idxs[k]]; 
+        result[i] += V[k] * xi[col_idxs[k]]; 
         // k will index into the values list because row_ptrs holds the indices of the values in V in each row 
         // it also works for col indicies (k-th nonzero element)
       }
     }
     return result; 
-
   }
+
+  void print()
+  {
+    std::cout << "Rows: " << rows << std::endl;
+    std::cout << "Cols: " << cols << std::endl;
+    std::cout << "num_values: " << V.size() << std::endl;
+    std::cout << "First col_idx: " << col_idxs[0] << std::endl;
+
+      for (int i = 0; i < row_ptrs.size() - 1; i++)  // Ensure we don't go out of bounds
+      {
+          for (int j = row_ptrs[i]; j < row_ptrs[i + 1]; j++)
+          {
+              // std::cout << "A at (" << i << "," << col_idxs[j] << "): " << V[j] << std::endl;
+              std::cout << "Now here" << std::endl;
+          }
+      }
+  }
+
 };
 
 #include <cmath>
@@ -156,13 +173,13 @@ void CG(const MapMatrix& A,
         std::vector<double>& x,
         double tol=1e-6) {
 
-  assert(b.size() == A.NbRow());
+  assert(b.size() == A.rows());
   x.assign(b.size(),0.);
 
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank); // Get the rank of the process
 
-  int n = A.NbRow();
+  int n = A.mrows();
 
   // get the local diagonal block of A
   std::vector<Eigen::Triplet<double>> coefficients;
@@ -177,12 +194,16 @@ void CG(const MapMatrix& A,
   B.setFromTriplets(coefficients.begin(), coefficients.end());
   Eigen::SimplicialCholesky<Eigen::SparseMatrix<double>> P(B);
 
+  std::cout << "Here" << std::endl;
+
   std::vector<double> r=b, z=prec(P,r), p=z, Ap=A*p;
   double np2=(p,Ap), alpha=0.,beta=0.;
   double nr = sqrt((z,r));
 
   std::vector<double> res = A*x;
   res += (-1)*b;
+
+  std::cout << "There" << std::endl;
   
   double rres = sqrt((res,res));
 
@@ -244,7 +265,6 @@ int main(int argc, char* argv[]) {
 
 
 
-
   int N = find_int_arg(argc, argv, "-N", 100000); // global size
 
   assert(N%size == 0);
@@ -263,6 +283,9 @@ int main(int argc, char* argv[]) {
     if (offset + i + N < N) A.Assign(i, i + N) = -1;
     if (offset + i - N >= 0) A.Assign(i, i - N) = -1;
   }
+
+  std::cout << "Starting A:" << std::endl;
+  A.print();
 
   // initial guess
   std::vector<double> x(n,0);
