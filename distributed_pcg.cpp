@@ -45,11 +45,9 @@ public:
     V.push_back(val); 
     col_idxs.push_back(j); 
 
-
-    if (i ==row_ptrs.size()-1) { // check if we are adding a new row 
+    if (i == row_ptrs.size()-1) { // check if we are adding a new row 
       // row_ptrs is the size of num nonzeros - 1 
       row_ptrs.push_back(V.size()-1);
-
     }
   }
 
@@ -106,9 +104,11 @@ public:
     std::cout << "Cols: " << cols << std::endl;
     std::cout << "num_values: " << V.size() << std::endl;
     std::cout << "First col_idx: " << col_idxs[0] << std::endl;
+    std::cout << "row_ptrs.size(): " << row_ptrs.size() << std::endl;
 
       for (int i = 0; i < row_ptrs.size() - 1; i++)  // Ensure we don't go out of bounds
       {
+        std::cout << "row_ptr at i = " << i << " = " << row_ptrs[i] << std::endl;
           for (int j = row_ptrs[i]; j < row_ptrs[i + 1]; j++)
           {
               // std::cout << "A at (" << i << "," << col_idxs[j] << "): " << V[j] << std::endl;
@@ -254,6 +254,7 @@ int main(int argc, char* argv[]) {
   
   int size;
   MPI_Comm_size(MPI_COMM_WORLD, &size); // Get the number of processes
+  std::cout << "number of processes: " << size << std::endl;
   
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank); // Get the rank of the process
@@ -277,11 +278,11 @@ int main(int argc, char* argv[]) {
 
   // local rows of the 1D Laplacian matrix; local column indices start at -1 for rank > 0
   for (int i=0; i<n; i++) {
-    A.Assign(i,i)=2.0;
-    if (offset + i - 1 >= 0) A.Assign(i,i - 1) = -1;
-    if (offset + i + 1 < N)  A.Assign(i,i + 1) = -1;
-    if (offset + i + N < N) A.Assign(i, i + N) = -1;
-    if (offset + i - N >= 0) A.Assign(i, i - N) = -1;
+    A.insert(i, i, 2.0);
+    if (offset + i - 1 >= 0) A.insert(i,i - 1, -1.0);
+    if (offset + i + 1 < N)  A.insert(i,i + 1, -1.0);
+    if (offset + i + N < N) A.insert(i, i + N, -1.0);
+    if (offset + i - N >= 0) A.insert(i, i - N, -1.0);
   }
 
   std::cout << "Starting A:" << std::endl;
