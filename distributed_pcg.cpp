@@ -12,9 +12,9 @@ typedef Eigen::Triplet<double> T;
 
 class MapMatrix {
 public:
-  typedef std::pair<int,int>   N2;
+  // typedef std::pair<int,int>   N2;
 
-  std::map<N2,double>  data;
+
 
   // using m, n for the spmat structure to differentiate for now 
   int rows, cols; // m=num rows, n = num columns 
@@ -25,16 +25,23 @@ public:
 
 public:
   MapMatrix(const int& nr, const int& nc):
-    rows(nr), cols(nc) {};
+
+    rows(nr), cols(nc) {row_ptrs.resize(nr + 1, 0);};
 
   MapMatrix(const MapMatrix& m): 
-    rows(m.mrows()), cols(m.ncols()) {}; 
+    // nbrow(m.nbrow), nbcol(m.nbcol), data(m.data) {}; 
+    rows(m.mrows()), cols(m.ncols()), V(m.V), col_idxs(m.col_idxs), row_ptrs(m.row_ptrs) {}; 
+
   
   MapMatrix& operator=(const MapMatrix& m){ 
     if(this!=&m){
       rows=m.rows;
       cols=m.cols;
-      data=m.data;
+
+      V = m.V; 
+      col_idxs = m.col_idxs; 
+      row_ptrs = m.row_ptrs; 
+
     }   
     return *this; 
   }
@@ -43,44 +50,53 @@ public:
 
   void insert(int i, int j, double val) {
     V.push_back(val); 
-    col_idxs.push_back(j); 
 
-    if (i == row_ptrs.size()-1) { // check if we are adding a new row 
-      // row_ptrs is the size of num nonzeros - 1 
-      row_ptrs.push_back(V.size()-1);
+    col_idxs.push_back(j);
+
+    for (int r = i + 1; r <= rows; ++r) {
+        ++row_ptrs[r];
+
     }
+    
   }
+
 
   double operator()(const int& j, const int& k) const {
-    auto search = data.find(std::make_pair(j,k));
-    if(search!=data.end()) return search->second;
-    return 0;
+    // find (i,j) ith row, jth col
+    for (int i = row_ptrs[j]; i<row_ptrs[j+1]; i++) { 
+      if (col_idxs[i] == k) {
+        return V[i];
+      }
+    }
+
+    return 0.0;
   }
 
-  double& Assign(const int& j, const int& k) {
-    return data[std::make_pair(j,k)];
+  void display() const{
+    std::cout << "nonzeros: " << V.size() << std::endl;
+    std::cout << "rows: " << rows << std::endl; 
+    std::cout << "row_ptrs size: " << row_ptrs.size() << std::endl;
+    std::cout << "cols " << cols << std::endl;
+    std::cout << "col idxs: " << col_idxs.size() << std::endl;
+    int idx = 0; 
+    for (int i = 0; i<rows; i++) {
+        for (int j=0; j<cols;j++) {
+            if (idx < row_ptrs[i+1] && col_idxs[idx]==j) {
+              // if current col is column index at idx , found the nonzero to print 
+              std::cout << V[idx] << "\t";
+              idx++;
+            } 
+            else {
+              std::cout << "0\t";
+            }
+        }
+        std::cout << std::endl;
+    }
   }
+  
 
   // parallel matrix-vector product with distributed vector xi
-  // Operator from starter code:
-  // std::vector<double> operator*(const std::vector<double>& xi) const {
 
-  //   std::vector<double> x(NbCol());
-  //   std::copy(xi.begin(),xi.end(),x.begin());
-    
-
-  //   std::vector<double> b(NbRow(),0.);
-  //   for(auto it=data.begin(); it!=data.end(); ++it){
-  //     int j = (it->first).first;
-  //     int k = (it->first).second; 
-  //     double Mjk = it->second;
-  //     b[j] += Mjk*x[k];
-  //   }
-
-  //   return b;
-  // }
-
-  // Operator for our updated class:
   std::vector<double> operator*(const std::vector<double>& xi) const {
     // A*x where A is mxn and x is nx1 
     // CSR format has length m+1 (last element is NNZ) from wikipedia pg on CSR 
@@ -97,6 +113,7 @@ public:
     }
     return result; 
   }
+
 
   void print()
   {
@@ -115,6 +132,7 @@ public:
               std::cout << "Now here" << std::endl;
           }
       }
+
   }
 
 };
@@ -161,7 +179,7 @@ void operator+=(std::vector<double>& u, const std::vector<double>& v){
 std::vector<double> prec(const Eigen::SimplicialCholesky<Eigen::SparseMatrix<double>>& P, const std::vector<double>& u){
   Eigen::VectorXd b(u.size());
   for (int i=0; i<u.size(); i++) b[i] = u[i];
-  Eigen::VectorXd xe = P.solve(b);
+  Eigen::VectorXd xe = P.solve(b); // solves Px=b (=xe)
   std::vector<double> x(u.size());
   for (int i=0; i<u.size(); i++) x[i] = xe[i];
   return x;
@@ -173,8 +191,9 @@ void CG(const MapMatrix& A,
         std::vector<double>& x,
         double tol=1e-6) {
 
-  assert(b.size() == A.rows());
-  x.assign(b.size(),0.);
+
+  assert(b.size() == A.mrows());
+  x.resize(b.size(),0.0);
 
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank); // Get the rank of the process
@@ -183,10 +202,11 @@ void CG(const MapMatrix& A,
 
   // get the local diagonal block of A
   std::vector<Eigen::Triplet<double>> coefficients;
-  for(auto it=A.data.begin(); it!=A.data.end(); ++it){
-    int j = (it->first).first;
-    int k = (it->first).second;
-    if (k >= 0 && k < n) coefficients.push_back(Eigen::Triplet<double>(j,k,it->second)); 
+  for (int i=0; i < n; i++) {
+    for (int k=A.row_ptrs[i]; k <A.row_ptrs[i+1]; k++) {
+      int j = A.col_idxs[k]; 
+      if (j>= 0 && j < n) coefficients.push_back(Eigen::Triplet<double>(i,j,A.V[k])); 
+    }
   }
 
   // compute the Cholesky factorization of the diagonal block for the preconditioner
@@ -250,6 +270,24 @@ int find_int_arg(int argc, char** argv, const char* option, int default_value) {
 }
 
 int main(int argc, char* argv[]) {
+//   MapMatrix A(3,3); 
+//   A.insert(0,0, 1.0);
+//   A.insert(0,1, 2.0);
+//   A.insert(1,1, 3.0);
+//   A.insert(1,2, 4.0);
+//   A.insert(2,2, 5.0);
+//   std::cout << "(0,0): " << A(0,0) << std::endl;
+//   std::cout << "(0,1): " << A(0,1) << std::endl;
+//   std::cout << "(1,1): " << A(1,1) << std::endl;
+//   std::cout << "(1,2): " << A(1,2) << std::endl;
+//   std::cout << "(2,2): " << A(2,2) << std::endl;
+//   A.print(); 
+//   for (const double& it: Ax) {
+//     std::cout << it << "\t";
+//   }
+  
+
+
   MPI_Init(&argc, &argv); // Initialize the MPI environment
   
   int size;
@@ -263,8 +301,6 @@ int main(int argc, char* argv[]) {
         std::cout << "-N <int>: side length of the sparse matrix" << std::endl;
         return 0;
     }
-
-
 
   int N = find_int_arg(argc, argv, "-N", 100000); // global size
 
