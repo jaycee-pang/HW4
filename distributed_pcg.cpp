@@ -15,8 +15,6 @@ public:
   typedef std::pair<int,int>   N2;
 
   std::map<N2,double>  data;
-  int nbrow;
-  int nbcol;
 
   // using m, n for the spmat structure to differentiate for now 
   int rows, cols; // m=num rows, n = num columns 
@@ -27,17 +25,15 @@ public:
 
 public:
   MapMatrix(const int& nr, const int& nc):
-    // nbrow(nr), nbcol(nc) {}; 
     rows(nr), cols(nc) {};
 
   MapMatrix(const MapMatrix& m): 
-    // nbrow(m.nbrow), nbcol(m.nbcol), data(m.data) {}; 
     rows(m.mrows()), cols(m.ncols()) {}; 
   
   MapMatrix& operator=(const MapMatrix& m){ 
     if(this!=&m){
-      nbrow=m.nbrow;
-      nbcol=m.nbcol;
+      rows=m.rows;
+      cols=m.cols;
       data=m.data;
     }   
     return *this; 
@@ -45,18 +41,13 @@ public:
   int mrows() const {return rows;}
   int ncols() const {return cols;}
 
-  // int NbRow() const {return nbrow;}
-  // int NbCol() const {return nbcol;}
-
   void insert(int i, int j, double val) {
     V.push_back(val); 
     col_idxs.push_back(j); 
 
-
-    if (i ==row_ptrs.size()-1) { // check if we are adding a new row 
+    if (i == row_ptrs.size()-1) { // check if we are adding a new row 
       // row_ptrs is the size of num nonzeros - 1 
       row_ptrs.push_back(V.size()-1);
-
     }
   }
 
@@ -71,6 +62,7 @@ public:
   }
 
   // parallel matrix-vector product with distributed vector xi
+  // Operator from starter code:
   // std::vector<double> operator*(const std::vector<double>& xi) const {
 
   //   std::vector<double> x(NbCol());
@@ -88,19 +80,8 @@ public:
   //   return b;
   // }
 
+  // Operator for our updated class:
   std::vector<double> operator*(const std::vector<double>& xi) const {
-    // std::vector<double> x(NbCol());
-    // std::copy(xi.begin(),xi.end(),x.begin());
-    // std::vector<double> b(NbRow(),0.);
-    // for(auto it=data.begin(); it!=data.end(); ++it){
-    //   int j = (it->first).first;
-    //   int k = (it->first).second; 
-    //   double Mjk = it->second;
-    //   b[j] += Mjk*x[k];
-    // }
-
-    // return b;
-    
     // A*x where A is mxn and x is nx1 
     // CSR format has length m+1 (last element is NNZ) from wikipedia pg on CSR 
     std::vector<double> result(row_ptrs.size() - 1, 0.0); 
@@ -109,16 +90,33 @@ public:
     for (int i=0; i < rows; i++) {
       // this is k=row_ptrs[i] to row_ptrs[i+1] - 1
       for (int k=row_ptrs[i]; k < row_ptrs[i+1]; k++) {
-        result[i] += values[k] * xi[col_idxs[k]]; 
+        result[i] += V[k] * xi[col_idxs[k]]; 
         // k will index into the values list because row_ptrs holds the indices of the values in V in each row 
         // it also works for col indicies (k-th nonzero element)
       }
     }
     return result; 
-
-
-
   }
+
+  void print()
+  {
+    std::cout << "Rows: " << rows << std::endl;
+    std::cout << "Cols: " << cols << std::endl;
+    std::cout << "num_values: " << V.size() << std::endl;
+    std::cout << "First col_idx: " << col_idxs[0] << std::endl;
+    std::cout << "row_ptrs.size(): " << row_ptrs.size() << std::endl;
+
+      for (int i = 0; i < row_ptrs.size() - 1; i++)  // Ensure we don't go out of bounds
+      {
+        std::cout << "row_ptr at i = " << i << " = " << row_ptrs[i] << std::endl;
+          for (int j = row_ptrs[i]; j < row_ptrs[i + 1]; j++)
+          {
+              // std::cout << "A at (" << i << "," << col_idxs[j] << "): " << V[j] << std::endl;
+              std::cout << "Now here" << std::endl;
+          }
+      }
+  }
+
 };
 
 #include <cmath>
@@ -175,13 +173,13 @@ void CG(const MapMatrix& A,
         std::vector<double>& x,
         double tol=1e-6) {
 
-  assert(b.size() == A.NbRow());
+  assert(b.size() == A.rows());
   x.assign(b.size(),0.);
 
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank); // Get the rank of the process
 
-  int n = A.NbRow();
+  int n = A.mrows();
 
   // get the local diagonal block of A
   std::vector<Eigen::Triplet<double>> coefficients;
@@ -196,13 +194,16 @@ void CG(const MapMatrix& A,
   B.setFromTriplets(coefficients.begin(), coefficients.end());
   Eigen::SimplicialCholesky<Eigen::SparseMatrix<double>> P(B);
 
+  std::cout << "Here" << std::endl;
+
   std::vector<double> r=b, z=prec(P,r), p=z, Ap=A*p;
   double np2=(p,Ap), alpha=0.,beta=0.;
   double nr = sqrt((z,r));
-  double epsilon = tol*nr;
 
   std::vector<double> res = A*x;
   res += (-1)*b;
+
+  std::cout << "There" << std::endl;
   
   double rres = sqrt((res,res));
 
@@ -253,6 +254,7 @@ int main(int argc, char* argv[]) {
   
   int size;
   MPI_Comm_size(MPI_COMM_WORLD, &size); // Get the number of processes
+  std::cout << "number of processes: " << size << std::endl;
   
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank); // Get the rank of the process
@@ -261,7 +263,6 @@ int main(int argc, char* argv[]) {
         std::cout << "-N <int>: side length of the sparse matrix" << std::endl;
         return 0;
     }
-
 
 
 
@@ -277,12 +278,15 @@ int main(int argc, char* argv[]) {
 
   // local rows of the 1D Laplacian matrix; local column indices start at -1 for rank > 0
   for (int i=0; i<n; i++) {
-    A.Assign(i,i)=2.0;
-    if (offset + i - 1 >= 0) A.Assign(i,i - 1) = -1;
-    if (offset + i + 1 < N)  A.Assign(i,i + 1) = -1;
-    if (offset + i + N < N) A.Assign(i, i + N) = -1;
-    if (offset + i - N >= 0) A.Assign(i, i - N) = -1;
+    A.insert(i, i, 2.0);
+    if (offset + i - 1 >= 0) A.insert(i,i - 1, -1.0);
+    if (offset + i + 1 < N)  A.insert(i,i + 1, -1.0);
+    if (offset + i + N < N) A.insert(i, i + N, -1.0);
+    if (offset + i - N >= 0) A.insert(i, i - N, -1.0);
   }
+
+  std::cout << "Starting A:" << std::endl;
+  A.print();
 
   // initial guess
   std::vector<double> x(n,0);
