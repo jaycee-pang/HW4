@@ -101,7 +101,7 @@ public:
   }
 
   std::vector<double> serial_mult(const std::vector<double>& xi) const {
-    CSR format has length m+1 (last element is NNZ) from wikipedia pg on CSR 
+    // CSR format has length m+1 (last element is NNZ) from wikipedia pg on CSR 
     std::vector<double> result(row_ptrs.size() - 1, 0.0); 
     // loop over rows, for each row, do nonzeros 
     for (int i=0; i < rows; i++) {
@@ -311,12 +311,12 @@ int main(int argc, char* argv[]) {
   assert(N%size == 0);
   int p = size; // # processes 
   int n = N/size; // number of local row, # rows each process will handle 
-  
+  std::cout << "local N/size: " << n << std::endl;
   // row-distributed matrix
   CSRSpMat A(N, N); // or CSRSpMat A(n, N);
   // int offset = n*rank; // changing this JP 
   int offset = rank*n; // start row index for CURRENT process changed by JP 
-  
+  std::cout << "offset: " << offset << std::endl;
   // local rows of the 1D Laplacian matrix; local column indices start at -1 for rank > 0
   // JP: insert entries keeping in mind global indicies 
   for (int i=0; i<n; i++) {
@@ -328,32 +328,33 @@ int main(int argc, char* argv[]) {
     if (global_row + i - N >= 0) A.insert(i, global_row - N, -1.0);
   }
   A.distribute(MPI_COMM_WORLD);
-  std::cout << "Starting A:" << std::endl;
-  A.display();
+  std::cout << "rank " << rank << " has rows from " << offset << " to " << offset + n - 1 << std::endl;
+  // std::cout << "Starting A:" << std::endl;
+  // A.display();
 
   // Code to uncomment once insertion is fully tested and understood
-  /*
-  // initial guess
-  std::vector<double> x(n,0);
 
-  // right-hand side
-  std::vector<double> b(n,1);
+  // // initial guess
+  // std::vector<double> x(n,0);
 
-  MPI_Barrier(MPI_COMM_WORLD);
-  double time = MPI_Wtime();
+  // // right-hand side
+  // std::vector<double> b(n,1);
 
-  CG(A,b,x);
+  // MPI_Barrier(MPI_COMM_WORLD);
+  // double time = MPI_Wtime();
 
-  MPI_Barrier(MPI_COMM_WORLD);
-  if (rank == 0) std::cout << "wall time for CG: " << MPI_Wtime()-time << std::endl;
+  // CG(A,b,x);
 
-  std::vector<double> r = A*x + (-1)*b;
+  // MPI_Barrier(MPI_COMM_WORLD);
+  // if (rank == 0) std::cout << "wall time for CG: " << MPI_Wtime()-time << std::endl;
 
-  double err = Norm(r)/Norm(b);
-  if (rank == 0) std::cout << "|Ax-b|/|b| = " << err << std::endl;
-  */
+  // std::vector<double> r = A*x + (-1)*b;
 
-  MPI_Finalize(); // Finalize the MPI environment
+  // double err = Norm(r)/Norm(b);
+  // if (rank == 0) std::cout << "|Ax-b|/|b| = " << err << std::endl;
+
+
+  // MPI_Finalize(); // Finalize the MPI environment
 
   return 0;
 }
