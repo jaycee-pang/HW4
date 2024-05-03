@@ -1,3 +1,4 @@
+#include <cmath>
 #include <iostream>
 #include <map>
 #include <vector>
@@ -6,6 +7,7 @@
 #include <numeric>
 
 #include <Eigen/Sparse>
+
 
 typedef Eigen::SparseMatrix<double> SpMat; // declares a column-major sparse matrix type of double
 typedef Eigen::Triplet<double> T;
@@ -36,7 +38,7 @@ public:
     return *this; 
   }
 
-  int mrows() const {return rows;}
+  int mrows() const {return rows;} // rows is not private so we could maybe delete these accessor functions or make rows private
   int ncols() const {return cols;}
 
   void insert(int i, int j, double val) {
@@ -48,7 +50,6 @@ public:
             row_ptrs[r]++;
         }
     }
-    
   }
 
   double operator()(const int& j, const int& k) const {
@@ -68,7 +69,7 @@ public:
     std::cout << "rows: " << rows << std::endl; 
     std::cout << "row_ptrs size: " << row_ptrs.size() << std::endl;
     std::cout << "cols " << cols << std::endl;
-    std::cout << "col idxs: " << col_idxs.size() << std::endl;
+    std::cout << "col idxs size: " << col_idxs.size() << std::endl;
     int idx = 0; 
     for (int i = 0; i<rows; i++) {
         for (int j=0; j<cols;j++) {
@@ -113,7 +114,6 @@ public:
     return result; 
 
   }
-
 
   void print()
   {
@@ -162,9 +162,8 @@ public:
     MPI_Bcast(row_ptrs.data(), row_ptrs.size(), MPI_INT, 0, MPI_COMM_WORLD);
   }
 
-};
 
-#include <cmath>
+};
 
 // parallel scalar product (u,v) (u and v are distributed)
 double operator,(const std::vector<double>& u, const std::vector<double>& v){ 
@@ -240,7 +239,6 @@ void CG(const CSRSpMat& A,
   B.setFromTriplets(coefficients.begin(), coefficients.end());
   Eigen::SimplicialCholesky<Eigen::SparseMatrix<double>> P(B);
 
-  // std::cout << "Here" << std::endl;
 
   std::vector<double> r=b, z=prec(P,r), p=z, Ap=A*p;
   double np2=(p,Ap), alpha=0.,beta=0.;
@@ -248,6 +246,7 @@ void CG(const CSRSpMat& A,
 
   std::vector<double> res = A*x;
   res += (-1)*b;
+
 
   // std::cout << "There" << std::endl;
   
@@ -296,8 +295,6 @@ int find_int_arg(int argc, char** argv, const char* option, int default_value) {
 }
 
 
-
-
 int main(int argc, char* argv[]) {
   MPI_Init(&argc, &argv); // Initialize the MPI environment
   int size, rank; 
@@ -332,8 +329,10 @@ int main(int argc, char* argv[]) {
   }
   A.distribute(MPI_COMM_WORLD);
   std::cout << "Starting A:" << std::endl;
-  A.print();
+  A.display();
 
+  // Code to uncomment once insertion is fully tested and understood
+  /*
   // initial guess
   std::vector<double> x(n,0);
 
@@ -352,6 +351,7 @@ int main(int argc, char* argv[]) {
 
   double err = Norm(r)/Norm(b);
   if (rank == 0) std::cout << "|Ax-b|/|b| = " << err << std::endl;
+  */
 
   MPI_Finalize(); // Finalize the MPI environment
 
