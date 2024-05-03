@@ -1,3 +1,4 @@
+#include <cmath>
 #include <iostream>
 #include <map>
 #include <vector>
@@ -7,14 +8,8 @@
 
 #include <Eigen/Sparse>
 
-typedef Eigen::SparseMatrix<double> SpMat; // declares a column-major sparse matrix type of double
-typedef Eigen::Triplet<double> T;
-
 class MapMatrix {
-public:
-  // typedef std::pair<int,int>   N2;
-
-
+public: 
 
   // using m, n for the spmat structure to differentiate for now 
   int rows, cols; // m=num rows, n = num columns 
@@ -23,7 +18,6 @@ public:
   std::vector<double> col_idxs; // column idx of nonzeros, size num nonzeros
   std::vector<double> row_ptrs; // length num rows + 1. It is the index in V where the row starts 
 
-public:
   MapMatrix(const int& nr, const int& nc):
 
     rows(nr), cols(nc) {row_ptrs.resize(nr + 1, 0);};
@@ -45,7 +39,8 @@ public:
     }   
     return *this; 
   }
-  int mrows() const {return rows;}
+
+  int mrows() const {return rows;} // rows is not private so we could maybe delete these accessor functions or make rows private
   int ncols() const {return cols;}
 
   void insert(int i, int j, double val) {
@@ -57,7 +52,6 @@ public:
         ++row_ptrs[r];
 
     }
-    
   }
 
 
@@ -77,7 +71,7 @@ public:
     std::cout << "rows: " << rows << std::endl; 
     std::cout << "row_ptrs size: " << row_ptrs.size() << std::endl;
     std::cout << "cols " << cols << std::endl;
-    std::cout << "col idxs: " << col_idxs.size() << std::endl;
+    std::cout << "col idxs size: " << col_idxs.size() << std::endl;
     int idx = 0; 
     for (int i = 0; i<rows; i++) {
         for (int j=0; j<cols;j++) {
@@ -113,31 +107,7 @@ public:
     }
     return result; 
   }
-
-
-  void print()
-  {
-    std::cout << "Rows: " << rows << std::endl;
-    std::cout << "Cols: " << cols << std::endl;
-    std::cout << "num_values: " << V.size() << std::endl;
-    std::cout << "First col_idx: " << col_idxs[0] << std::endl;
-    std::cout << "row_ptrs.size(): " << row_ptrs.size() << std::endl;
-
-      for (int i = 0; i < row_ptrs.size() - 1; i++)  // Ensure we don't go out of bounds
-      {
-        std::cout << "row_ptr at i = " << i << " = " << row_ptrs[i] << std::endl;
-          for (int j = row_ptrs[i]; j < row_ptrs[i + 1]; j++)
-          {
-              // std::cout << "A at (" << i << "," << col_idxs[j] << "): " << V[j] << std::endl;
-              std::cout << "Now here" << std::endl;
-          }
-      }
-
-  }
-
 };
-
-#include <cmath>
 
 // parallel scalar product (u,v) (u and v are distributed)
 double operator,(const std::vector<double>& u, const std::vector<double>& v){ 
@@ -214,16 +184,12 @@ void CG(const MapMatrix& A,
   B.setFromTriplets(coefficients.begin(), coefficients.end());
   Eigen::SimplicialCholesky<Eigen::SparseMatrix<double>> P(B);
 
-  std::cout << "Here" << std::endl;
-
   std::vector<double> r=b, z=prec(P,r), p=z, Ap=A*p;
   double np2=(p,Ap), alpha=0.,beta=0.;
   double nr = sqrt((z,r));
 
   std::vector<double> res = A*x;
   res += (-1)*b;
-
-  std::cout << "There" << std::endl;
   
   double rres = sqrt((res,res));
 
@@ -281,11 +247,7 @@ int main(int argc, char* argv[]) {
 //   std::cout << "(1,1): " << A(1,1) << std::endl;
 //   std::cout << "(1,2): " << A(1,2) << std::endl;
 //   std::cout << "(2,2): " << A(2,2) << std::endl;
-//   A.print(); 
-//   for (const double& it: Ax) {
-//     std::cout << it << "\t";
-//   }
-  
+//   A.display(); 
 
 
   MPI_Init(&argc, &argv); // Initialize the MPI environment
@@ -322,8 +284,10 @@ int main(int argc, char* argv[]) {
   }
 
   std::cout << "Starting A:" << std::endl;
-  A.print();
+  A.display();
 
+  // Code to uncomment once insertion is fully tested and understood
+  /*
   // initial guess
   std::vector<double> x(n,0);
 
@@ -342,6 +306,7 @@ int main(int argc, char* argv[]) {
 
   double err = Norm(r)/Norm(b);
   if (rank == 0) std::cout << "|Ax-b|/|b| = " << err << std::endl;
+  */
 
   MPI_Finalize(); // Finalize the MPI environment
 
