@@ -107,6 +107,7 @@ public:
     }
     return result; 
   }
+};
 
 // parallel scalar product (u,v) (u and v are distributed)
 double operator,(const std::vector<double>& u, const std::vector<double>& v){ 
@@ -285,6 +286,8 @@ int main(int argc, char* argv[]) {
   std::cout << "Starting A:" << std::endl;
   A.display();
 
+  // Code to uncomment once insertion is fully tested and understood
+  /*
   // initial guess
   std::vector<double> x(n,0);
 
@@ -303,6 +306,7 @@ int main(int argc, char* argv[]) {
 
   double err = Norm(r)/Norm(b);
   if (rank == 0) std::cout << "|Ax-b|/|b| = " << err << std::endl;
+  */
 
   MPI_Finalize(); // Finalize the MPI environment
 
