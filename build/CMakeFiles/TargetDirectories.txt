@@ -1,0 +1,3 @@
+/global/homes/c/chongyef/HW4/build/CMakeFiles/pcg.dir
+/global/homes/c/chongyef/HW4/build/CMakeFiles/edit_cache.dir
+/global/homes/c/chongyef/HW4/build/CMakeFiles/rebuild_cache.dir
