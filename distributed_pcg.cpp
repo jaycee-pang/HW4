@@ -40,6 +40,9 @@ public:
 
   int mrows() const {return rows;} // rows is not private so we could maybe delete these accessor functions or make rows private
   int ncols() const {return cols;}
+  std::vector<int> col_idxs_data() const {return col_idxs;}
+  std::vector<int> row_ptrs_data() const {return row_ptrs;}
+  std::vector<double> V_data() const {return V;}
 
   void insert(int i, int j, double val) {
     if (val != 0.0) {
@@ -134,32 +137,52 @@ public:
       }
   }
 
-  void distribute(MPI_Comm comm) {
+  void distribute(MPI_Comm comm, int N) {
+    // pass in global N in case rows somehow gets messed up 
     int rank, size; 
     MPI_Comm_rank(comm, &rank);
     MPI_Comm_size(comm, &size);
     std::vector<int> local_sizes(size);
-
-    int nr_rows = rows/size; // subset of rows to go to each proc , rows per proc 
-    int remaining_rows = rows % size; 
-    int start_row = rank * nr_rows; 
-    // need th elast process to handle remaining rows when leftover local rows
-    if (rank == size-1) {
-      nr_rows = rows-start_row; 
+    int nr_rows = N/size; 
+    int remainder = N%size; 
+    int start_row, end_row;
+    std::cout << "in distribute function, N is: " << N << std::endl;
+    if (rank < remainder) {
+      nr_rows += 1;
+      start_row = rank*nr_rows;
+    } 
+    else {
+      start_row = rank * nr_rows+remainder;
     }
-    MPI_Bcast(&nr_rows, 1, MPI_INT, 0, comm); // bcast: one proc sends same data to all proc
-                                              // all proc needs to know how many local rows
-    // mem for the local matrix components 
-    std::vector<double> local_Vs(nr_rows); 
-    std::vector<int> local_col_idxs(nr_rows); 
-    // this is how we distribute the matrix data 
-    MPI_Scatterv(V.data(), &row_ptrs[0], &row_ptrs[1], MPI_DOUBLE,
-                 local_Vs.data(),nr_rows, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-    MPI_Scatterv(col_idxs.data(), &row_ptrs[0], &row_ptrs[1], MPI_INT,
-                 local_col_idxs.data(), nr_rows, MPI_INT, 0, MPI_COMM_WORLD);
+    end_row = start_row +nr_rows-1;
 
-    // bcast sends same data: all procs needs to know row pointers 
-    MPI_Bcast(row_ptrs.data(), row_ptrs.size(), MPI_INT, 0, MPI_COMM_WORLD);
+    std::cout << "Rank " << rank << " has rows from " << start_row << " to " << end_row << std::endl;
+    int num_local_vals = 0; 
+    for (int i=start_row; i<=end_row; i++) {
+      num_local_vals += row_ptrs[i+1]-row_ptrs[i];
+    }
+    
+    std::vector<int> local_row_ptrs(nr_rows+1);  // CSR: num nonzeros+1
+    std::vector<int> local_col_idxs(num_local_vals); 
+    std::vector<double> local_Vs(num_local_vals); 
+    // tell MPI how much data to distribute 
+    MPI_Scatter(&row_ptrs[start_row], nr_rows + 1, MPI_INT,
+                local_row_ptrs.data(), nr_rows + 1, MPI_INT, 0, comm);
+    MPI_Scatterv(col_idxs.data(), reinterpret_cast<const int*>(&row_ptrs[start_row]), reinterpret_cast<const int*>(&row_ptrs[end_row + 1] - &row_ptrs[start_row]),
+                 MPI_INT, local_col_idxs.data(), num_local_vals, MPI_INT, 0, comm);
+    MPI_Scatterv(V.data(), reinterpret_cast<const int*>(&row_ptrs[start_row]), reinterpret_cast<const int*>(&row_ptrs[end_row + 1] - &row_ptrs[start_row]),
+                 MPI_DOUBLE, local_Vs.data(), num_local_vals, MPI_DOUBLE, 0, comm);
+    // update local row pointers to their local data indicies
+    for (int i = 0; i<=nr_rows; i++) {
+        local_row_ptrs[i] -=row_ptrs[start_row];
+    }
+    // change the matrix 
+    rows = nr_rows;
+    row_ptrs = local_row_ptrs;
+    col_idxs = local_col_idxs;
+    V = local_Vs;
+
+
   }
 
 
@@ -312,9 +335,9 @@ int main(int argc, char* argv[]) {
   int p = size; // # processes 
   int n = N/size; // number of local row, # rows each process will handle 
   std::cout << "local N/size: " << n << std::endl;
-  // row-distributed matrix
+
   CSRSpMat A(N, N); // or CSRSpMat A(n, N);
-  // int offset = n*rank; // changing this JP 
+
   int offset = rank*n; // start row index for CURRENT process changed by JP 
   std::cout << "offset: " << offset << std::endl;
   // local rows of the 1D Laplacian matrix; local column indices start at -1 for rank > 0
@@ -327,7 +350,8 @@ int main(int argc, char* argv[]) {
     if (global_row + i + N < N) A.insert(i, global_row + N, -1.0);
     if (global_row + i - N >= 0) A.insert(i, global_row - N, -1.0);
   }
-  A.distribute(MPI_COMM_WORLD);
+  // A.distribute(MPI_COMM_WORLD, N);
+
   std::cout << "rank " << rank << " has rows from " << offset << " to " << offset + n - 1 << std::endl;
   // std::cout << "Starting A:" << std::endl;
   // A.display();
