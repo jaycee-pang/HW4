@@ -297,12 +297,20 @@ int main(int argc, char* argv[]) {
   // local rows of the 1D Laplacian matrix; local column indices start at -1 for rank > 0
   // JP: insert entries keeping in mind global indicies 
   for (int i=0; i<n; i++) {
-    int global_row = offset+i;  // ex. N=100 and p=4, then each p has N/4 = 25 rows 
-    A.insert(i, global_row, 2.0); // Diagonal element
-    if (global_row - 1 >= 0 && (global_row % N) != 0) A.insert(i, global_row - 1, -1.0); // Left neighbor
-    if (global_row + 1 < N && (global_row + 1) % N != 0) A.insert(i, global_row + 1, -1.0); // Right neighbor
-    if (global_row - N >= 0) A.insert(i, global_row - N, -1.0); // Upper neighbor
-    if (global_row + N < N) A.insert(i, global_row + N, -1.0); // Lower neighbor
+ 
+    int global_row = offset + i;
+    for (int j = -1; j <= 1; j++) {
+        int col_idx = global_row + j;
+        if (col_idx >= 0 && col_idx < N) {
+            if (col_idx == global_row) {
+                // Diagonal element
+                A.insert(i, col_idx, 2.0);
+            } else {
+                // Neighboring elements
+                A.insert(i, col_idx, -1.0);
+            }
+        }
+    }
   }
   std::cout << "Rank " << rank << " has rows from " << offset << " to " << offset + n - 1 << std::endl;
   // std::cout << "Starting A:" << std::endl;
