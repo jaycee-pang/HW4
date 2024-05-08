@@ -8,7 +8,6 @@
 
 #include <Eigen/Sparse>
 
-
 typedef Eigen::SparseMatrix<double> SpMat; // declares a column-major sparse matrix type of double
 typedef Eigen::Triplet<double> T;
 
@@ -68,11 +67,11 @@ public:
   }
 
   void display() const{
-    std::cout << "nonzeros: " << V.size() << std::endl;
-    std::cout << "rows: " << rows << std::endl; 
-    std::cout << "row_ptrs size: " << row_ptrs.size() << std::endl;
-    std::cout << "cols " << cols << std::endl;
-    std::cout << "col idxs size: " << col_idxs.size() << std::endl;
+    // std::cout << "nonzeros: " << V.size() << std::endl;
+    // std::cout << "rows: " << rows << std::endl; 
+    // std::cout << "row_ptrs size: " << row_ptrs.size() << std::endl;
+    // std::cout << "cols " << cols << std::endl;
+    // std::cout << "col idxs size: " << col_idxs.size() << std::endl;
     int idx = 0; 
     for (int i = 0; i<rows; i++) {
         for (int j=0; j<cols;j++) {
@@ -129,60 +128,12 @@ public:
       for (int i = 0; i < row_ptrs.size() - 1; i++)  // Ensure we don't go out of bounds
       {
         std::cout << "row_ptr at i = " << i << " = " << row_ptrs[i] << std::endl;
-          for (int j = row_ptrs[i]; j < row_ptrs[i + 1]; j++)
+          for (int j = row_ptrs[i]; j < row_ptrs[i+1]; j++)
           {
               // std::cout << "A at (" << i << "," << col_idxs[j] << "): " << V[j] << std::endl;
               std::cout << "Now here" << std::endl;
           }
       }
-  }
-
-  void distribute(MPI_Comm comm, int N) {
-    // pass in global N in case rows somehow gets messed up 
-    int rank, size; 
-    MPI_Comm_rank(comm, &rank);
-    MPI_Comm_size(comm, &size);
-    std::vector<int> local_sizes(size);
-    int nr_rows = N/size; 
-    int remainder = N%size; 
-    int start_row, end_row;
-    std::cout << "in distribute function, N is: " << N << std::endl;
-    if (rank < remainder) {
-      nr_rows += 1;
-      start_row = rank*nr_rows;
-    } 
-    else {
-      start_row = rank * nr_rows+remainder;
-    }
-    end_row = start_row +nr_rows-1;
-
-    std::cout << "Rank " << rank << " has rows from " << start_row << " to " << end_row << std::endl;
-    int num_local_vals = 0; 
-    for (int i=start_row; i<=end_row; i++) {
-      num_local_vals += row_ptrs[i+1]-row_ptrs[i];
-    }
-    
-    std::vector<int> local_row_ptrs(nr_rows+1);  // CSR: num nonzeros+1
-    std::vector<int> local_col_idxs(num_local_vals); 
-    std::vector<double> local_Vs(num_local_vals); 
-    // tell MPI how much data to distribute 
-    MPI_Scatter(&row_ptrs[start_row], nr_rows + 1, MPI_INT,
-                local_row_ptrs.data(), nr_rows + 1, MPI_INT, 0, comm);
-    MPI_Scatterv(col_idxs.data(), reinterpret_cast<const int*>(&row_ptrs[start_row]), reinterpret_cast<const int*>(&row_ptrs[end_row + 1] - &row_ptrs[start_row]),
-                 MPI_INT, local_col_idxs.data(), num_local_vals, MPI_INT, 0, comm);
-    MPI_Scatterv(V.data(), reinterpret_cast<const int*>(&row_ptrs[start_row]), reinterpret_cast<const int*>(&row_ptrs[end_row + 1] - &row_ptrs[start_row]),
-                 MPI_DOUBLE, local_Vs.data(), num_local_vals, MPI_DOUBLE, 0, comm);
-    // update local row pointers to their local data indicies
-    for (int i = 0; i<=nr_rows; i++) {
-        local_row_ptrs[i] -=row_ptrs[start_row];
-    }
-    // change the matrix 
-    rows = nr_rows;
-    row_ptrs = local_row_ptrs;
-    col_idxs = local_col_idxs;
-    V = local_Vs;
-
-
   }
 
 
@@ -270,8 +221,6 @@ void CG(const CSRSpMat& A,
   std::vector<double> res = A*x;
   res += (-1)*b;
 
-
-  // std::cout << "There" << std::endl;
   
   double rres = sqrt((res,res));
 
@@ -336,7 +285,8 @@ int main(int argc, char* argv[]) {
   int n = N/size; // number of local row, # rows each process will handle 
   std::cout << "local N/size: " << n << std::endl;
 
-  CSRSpMat A(N, N); // or CSRSpMat A(n, N);
+  // CSRSpMat A(N, N); // or 
+  CSRSpMat A(n, N);
 
   int offset = rank*n; // start row index for CURRENT process changed by JP 
   std::cout << "offset: " << offset << std::endl;
@@ -344,41 +294,37 @@ int main(int argc, char* argv[]) {
   // JP: insert entries keeping in mind global indicies 
   for (int i=0; i<n; i++) {
     int global_row = offset+1;  // ex. N=100 and p=4, then each p has N/4 = 25 rows 
-    A.insert(i, global_row, 2.0);
-    if (global_row + i - 1 >= 0) A.insert(i,global_row - 1, -1.0); // insert if wihtin local p 
-    if (global_row + i + 1 < N)  A.insert(i,global_row + 1, -1.0);
-    if (global_row + i + N < N) A.insert(i, global_row + N, -1.0);
-    if (global_row + i - N >= 0) A.insert(i, global_row - N, -1.0);
+    A.insert(i, i, 2.0);
+    if (offset + i - 1 >= 0) A.insert(i, i - 1, -1.0);  
+    if (offset + i + 1 < N) A.insert(i, i + 1, -1.0);  
+    if (offset + i + N < N) A.insert(i, i + N, -1.0);  
+    if (offset + i - N >= 0) A.insert(i, i - N, -1.0);  
   }
-  // A.distribute(MPI_COMM_WORLD, N);
-
-  std::cout << "rank " << rank << " has rows from " << offset << " to " << offset + n - 1 << std::endl;
+  std::cout << "Rank " << rank << " has rows from " << offset << " to " << offset + n - 1 << std::endl;
   // std::cout << "Starting A:" << std::endl;
   // A.display();
 
-  // Code to uncomment once insertion is fully tested and understood
-
   // // initial guess
-  // std::vector<double> x(n,0);
+  std::vector<double> x(n,0);
 
   // // right-hand side
-  // std::vector<double> b(n,1);
+  std::vector<double> b(n,1);
 
-  // MPI_Barrier(MPI_COMM_WORLD);
-  // double time = MPI_Wtime();
+  MPI_Barrier(MPI_COMM_WORLD);
+  double time = MPI_Wtime();
 
-  // CG(A,b,x);
+  CG(A,b,x);
 
-  // MPI_Barrier(MPI_COMM_WORLD);
-  // if (rank == 0) std::cout << "wall time for CG: " << MPI_Wtime()-time << std::endl;
+  MPI_Barrier(MPI_COMM_WORLD);
+  if (rank == 0) std::cout << "wall time for CG: " << MPI_Wtime()-time << std::endl;
 
-  // std::vector<double> r = A*x + (-1)*b;
+  std::vector<double> r = A*x + (-1)*b;
 
-  // double err = Norm(r)/Norm(b);
-  // if (rank == 0) std::cout << "|Ax-b|/|b| = " << err << std::endl;
+  double err = Norm(r)/Norm(b);
+  if (rank == 0) std::cout << "|Ax-b|/|b| = " << err << std::endl;
 
 
-  // MPI_Finalize(); // Finalize the MPI environment
+  MPI_Finalize(); // Finalize the MPI environment
 
   return 0;
 }
