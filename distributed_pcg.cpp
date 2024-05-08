@@ -63,32 +63,6 @@ public:
 
   }
 
-  void display() const{
-    // std::cout << "2,1" << (*this)(2,1) << std::endl;
-    // std::cout << "3,1" << (*this)(3,1) << std::endl;
-    // std::cout << "2,2" << (*this)(2,2) << std::endl;
-    std::cout << "nonzeros: " << V.size() << std::endl;
-    std::cout << "rows: " << rows << std::endl; 
-    std::cout << "row_ptrs size: " << row_ptrs.size() << std::endl;
-    std::cout << "cols " << cols << std::endl;
-    std::cout << "col idxs size: " << col_idxs.size() << std::endl;
-    int idx = 0; 
-    for (int i = 0; i<rows; i++) {
-        for (int j=0; j<cols;j++) {
-            if (idx < row_ptrs[i+1] && col_idxs[idx]==j) {
-              // if current col is column index at idx , found the nonzero to print 
-              std::cout << V[idx] << "\t";
-              idx++;
-            } 
-            else {
-              std::cout << "0\t";
-            }
-        }
-        std::cout << std::endl;
-    }
-  }
-  
-
   // parallel matrix-vector product with distributed vector xi
   std::vector<double> operator*(const std::vector<double>& xi) const {
     std::vector<double> local_result(row_ptrs.size() - 1, 0.0); 
@@ -144,6 +118,48 @@ public:
     // bcast sends same data: all procs needs to know row pointers 
     MPI_Bcast(row_ptrs.data(), row_ptrs.size(), MPI_INT, 0, MPI_COMM_WORLD);
   }
+
+void display() const {
+    std::cout << "Matrix (" << rows << " x " << cols << "):" << std::endl;
+    for (int i = 0; i < rows; ++i) {
+        int start_idx = row_ptrs[i];  // Start index in V for the current row
+        int end_idx = row_ptrs[i + 1];  // End index in V for the current row
+        std::vector<std::pair<int, double>> col_val_pairs;
+
+        // Collect all column indices and values in this row
+        for (int j = start_idx; j < end_idx; ++j) {
+            col_val_pairs.emplace_back(col_idxs[j], V[j]);
+        }
+
+        // Sort pairs by column index
+        std::sort(col_val_pairs.begin(), col_val_pairs.end(), 
+                  [](const std::pair<int, double>& a, const std::pair<int, double>& b) {
+                      return a.first < b.first;
+                  });
+
+        // Display the row with zeros for missing columns
+        int current_col = 0;
+        for (const auto& pair : col_val_pairs) {
+            // Print zeros until the current column index
+            while (current_col < pair.first) {
+                std::cout << "0 ";
+                current_col++;
+            }
+            // Print the value at the current column index
+            std::cout << pair.second << " ";
+            current_col++;
+        }
+
+        // Fill in trailing zeros if any
+        while (current_col < cols) {
+            std::cout << "0 ";
+            current_col++;
+        }
+        std::cout << std::endl;
+    }
+  }
+
+
 };
 
 // parallel scalar product (u,v) (u and v are distributed)
@@ -295,22 +311,23 @@ int main(int argc, char* argv[]) {
   int p = size; // # processes 
   int n = N/size; // number of local row, # rows each process will handle 
   if (rank == 0) std::cout << "N/size: " << n << std::endl;
+
   // row-distributed matrix
   CSRSpMat A(N, N); // or CSRSpMat A(n, N);
   int offset = rank*n; // start row index for CURRENT process changed by JP 
-  std::cout << "offset: " << offset << std::endl;
+  // std::cout << "offset: " << offset << std::endl;
+
   // local rows of the 1D Laplacian matrix; local column indices start at -1 for rank > 0
   for (int i=0; i<n; i++) {
     int global_row = offset + i;  // ex. N=100 and p=4, then each p has N/4 = 25 rows 
     A.insert(global_row, global_row, 2.0);
     if (global_row - 1 >= 0) A.insert(global_row,global_row - 1, -1.0); // insert if wihtin local p 
     if (global_row + 1 < N)  A.insert(global_row,global_row + 1, -1.0);
-    // if (global_row + i + N < N) A.insert(global_row, global_row + N, -1.0);
-    // if (global_row + i - N >= 0) A.insert(global_row, global_row - N, -1.0);
   }
+
   // A.distribute(MPI_COMM_WORLD);
   // std::cout << "rank " << rank << " has rows from " << offset << " to " << offset + n - 1 << std::endl;
-  if (rank == 2) A.display();
+  if (rank == 4) A.display();
 
   // Code to uncomment once insertion is fully tested and understood
 
@@ -334,7 +351,7 @@ int main(int argc, char* argv[]) {
   // if (rank == 0) std::cout << "|Ax-b|/|b| = " << err << std::endl;
 
 
-  // MPI_Finalize(); // Finalize the MPI environment
+  MPI_Finalize(); // Finalize the MPI environment
 
   return 0;
 }
