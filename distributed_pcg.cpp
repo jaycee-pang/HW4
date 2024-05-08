@@ -86,7 +86,11 @@ public:
         }
         std::cout << std::endl;
     }
+
+  
   }
+  
+
   
 
   // parallel matrix-vector product with distributed vector xi
@@ -293,18 +297,18 @@ int main(int argc, char* argv[]) {
   // local rows of the 1D Laplacian matrix; local column indices start at -1 for rank > 0
   // JP: insert entries keeping in mind global indicies 
   for (int i=0; i<n; i++) {
-    int global_row = offset+1;  // ex. N=100 and p=4, then each p has N/4 = 25 rows 
-    A.insert(i, i, 2.0);
-    if (offset + i - 1 >= 0) A.insert(i, i - 1, -1.0);  
-    if (offset + i + 1 < N) A.insert(i, i + 1, -1.0);  
-    if (offset + i + N < N) A.insert(i, i + N, -1.0);  
-    if (offset + i - N >= 0) A.insert(i, i - N, -1.0);  
+    int global_row = offset+i;  // ex. N=100 and p=4, then each p has N/4 = 25 rows 
+    A.insert(i, global_row, 2.0); // Diagonal element
+    if (global_row - 1 >= 0 && (global_row % N) != 0) A.insert(i, global_row - 1, -1.0); // Left neighbor
+    if (global_row + 1 < N && (global_row + 1) % N != 0) A.insert(i, global_row + 1, -1.0); // Right neighbor
+    if (global_row - N >= 0) A.insert(i, global_row - N, -1.0); // Upper neighbor
+    if (global_row + N < N) A.insert(i, global_row + N, -1.0); // Lower neighbor
   }
   std::cout << "Rank " << rank << " has rows from " << offset << " to " << offset + n - 1 << std::endl;
   // std::cout << "Starting A:" << std::endl;
-  // A.display();
+  A.display();
 
-  // // initial guess
+  // initial guess
   std::vector<double> x(n,0);
 
   // // right-hand side
