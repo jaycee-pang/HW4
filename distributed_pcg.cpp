@@ -134,25 +134,131 @@ void parallel_CG(const CSRSpMat& A, const std::vector<double>& b, std::vector<do
     if (rank == 0) {
         std::cout << "Conjugate Gradient completed after " << iter << " iterations." << std::endl;
     }
+
+    return default_value;
+}
+
+void testCSRMatrixAndCGSolver(MPI_Comm comm) {
+    int rank, size;
+    MPI_Comm_rank(comm, &rank);
+    MPI_Comm_size(comm, &size);
+
+    int N = 1000; // Example size of the matrix, should be divisible by 'size'
+    assert(N % size == 0); // Ensure N is evenly divisible by the number of processes
+
+    int local_rows = N / size; // Number of rows per process
+    int offset = rank * local_rows; // Starting row index for this process
+
+    CSRSpMat A(local_rows, N); // Local part of the CSR matrix of size local_rows x N
+
+    // Initialize matrix A
+    for (int i = 0; i < local_rows; i++) {
+        int global_row = i + offset; // Convert local row index to global row index
+        A.insert(i, global_row, 2.0); // Diagonal dominance
+        if (global_row > 0) A.insert(i, global_row - 1, -1.0); // Sub-diagonal
+        if (global_row < N - 1) A.insert(i, global_row + 1, -1.0); // Super-diagonal
+    }
+
+    std::vector<double> b(local_rows, 1.0); // Right-hand side vector initialized to all ones
+    std::vector<double> x(local_rows, 0.0); // Solution vector initialized to zero
+
+    // Call the Conjugate Gradient function
+    double tol = 1e-6; // Tolerance for the CG solver
+    CG(A, b, x, tol);
+
+    // Optionally, print the results
+    if (rank == 0) {
+        std::cout << "Test completed. Solution vector x[0]: " << x[0] << std::endl;
+    }
 }
 
 int main(int argc, char* argv[]) {
     MPI_Init(&argc, &argv);
-    int rank, size;
-    MPI_Comm_size(MPI_COMM_WORLD, &size);
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm comm = MPI_COMM_WORLD;
 
-    int N = (argc > 1) ? atoi(argv[1]) : 1000; // Default matrix size or from command line
+    // Determine the rank of the process
+    int rank;
+    MPI_Comm_rank(comm, &rank);
 
-    CSRSpMat A(N, N); // Initialize the matrix
-    // Fill the matrix A appropriately here
-
-    std::vector<double> b(N, 1.0); // Example vector b
-    std::vector<double> x(N, 0.0); // Solution vector
-
-    double tol = 1e-6; // Tolerance for convergence
-    parallel_CG(A, b, x, tol, MPI_COMM_WORLD);
+    if (argc > 1 && std::string(argv[1]) == "--test") {
+        // Run tests only if a specific command line argument is provided
+        testCSRMatrixAndCGSolver(comm);
+    } else {
+        // Regular execution path
+        int N = find_int_arg(argc, argv, "-N", 10000); // Default to a size of 10,000 if not specified
+        if (rank == 0) {
+            std::cout << "Solving a system with matrix size " << N << "x" << N << std::endl;
+        }
+        CSRSpMat A(N, N); // Example matrix initialization
+        std::vector<double> b(N, 1.0), x(N, 0.0);
+        CG(A, b, x, 1e-6);
+    }
 
     MPI_Finalize();
     return 0;
 }
+
+
+// int main(int argc, char* argv[]) {
+
+//   MPI_Init(&argc, &argv); // Initialize the MPI environment
+//   int size, rank; 
+//   MPI_Comm_size(MPI_COMM_WORLD, &size); // Get the number of processes
+//   std::cout << "number of processes: " << size << std::endl;
+//   MPI_Comm_rank(MPI_COMM_WORLD, &rank); // Get the rank of the CURRENT process
+//     if (find_arg_idx(argc, argv, "-h") >= 0) {
+//         std::cout << "-N <int>: side length of the sparse matrix" << std::endl;
+//         return 0;
+//     }
+
+//   int N = find_int_arg(argc, argv, "-N", 100000); // global size // global # rows 
+
+//   assert(N%size == 0);
+//   int p = size; // # processes 
+//   int n = N/size; // number of local row, # rows each process will handle 
+//   std::cout << "local N/size: " << n << std::endl;
+
+//   // CSRSpMat A(N, N); // or 
+//   CSRSpMat A(n, N);
+
+//   int offset = rank*n; // start row index for CURRENT process changed by JP 
+//   std::cout << "offset: " << offset << std::endl;
+//   // local rows of the 1D Laplacian matrix; local column indices start at -1 for rank > 0
+//   // JP: insert entries keeping in mind global indicies 
+//   for (int i=0; i<n; i++) {
+//     int global_row = offset+1;  // ex. N=100 and p=4, then each p has N/4 = 25 rows 
+//     A.insert(i, i, 2.0);
+//     if (offset + i - 1 >= 0) A.insert(i, i - 1, -1.0);  
+//     if (offset + i + 1 < N) A.insert(i, i + 1, -1.0);  
+//     if (offset + i + N < N) A.insert(i, i + N, -1.0);  
+//     if (offset + i - N >= 0) A.insert(i, i - N, -1.0);  
+//   }
+//   std::cout << "Rank " << rank << " has rows from " << offset << " to " << offset + n - 1 << std::endl;
+//   // std::cout << "Starting A:" << std::endl;
+//   // A.display();
+
+//   // // initial guess
+//   std::vector<double> x(n,0);
+
+//   // // right-hand side
+//   std::vector<double> b(n,1);
+
+//   MPI_Barrier(MPI_COMM_WORLD);
+//   double time = MPI_Wtime();
+
+//   CG(A,b,x);
+
+//   MPI_Barrier(MPI_COMM_WORLD);
+//   if (rank == 0) std::cout << "wall time for CG: " << MPI_Wtime()-time << std::endl;
+
+//   std::vector<double> r = A*x + (-1)*b;
+
+//   double err = Norm(r)/Norm(b);
+//   if (rank == 0) std::cout << "|Ax-b|/|b| = " << err << std::endl;
+
+
+//   MPI_Finalize(); // Finalize the MPI environment
+
+//   return 0;
+// }
+
