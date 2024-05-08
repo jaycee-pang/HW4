@@ -45,8 +45,7 @@ public:
     if (val != 0.0) {
         V.push_back(val);
         col_idxs.push_back(j);
-        // row_ptrs[i+1]++; // need to increment for the next row 
-        for (int r =i+1; r<rows+1; ++r) {
+        for (int r = i+1; r < rows + 1; ++r) {
             row_ptrs[r]++;
         }
     }
@@ -65,6 +64,9 @@ public:
   }
 
   void display() const{
+    // std::cout << "2,1" << (*this)(2,1) << std::endl;
+    // std::cout << "3,1" << (*this)(3,1) << std::endl;
+    // std::cout << "2,2" << (*this)(2,2) << std::endl;
     std::cout << "nonzeros: " << V.size() << std::endl;
     std::cout << "rows: " << rows << std::endl; 
     std::cout << "row_ptrs size: " << row_ptrs.size() << std::endl;
@@ -115,25 +117,6 @@ public:
 
   }
 
-  void print()
-  {
-    std::cout << "Rows: " << rows << std::endl;
-    std::cout << "Cols: " << cols << std::endl;
-    std::cout << "num_values: " << V.size() << std::endl;
-    std::cout << "First col_idx: " << col_idxs[0] << std::endl;
-    std::cout << "row_ptrs.size(): " << row_ptrs.size() << std::endl;
-
-      for (int i = 0; i < row_ptrs.size() - 1; i++)  // Ensure we don't go out of bounds
-      {
-        std::cout << "row_ptr at i = " << i << " = " << row_ptrs[i] << std::endl;
-          for (int j = row_ptrs[i]; j < row_ptrs[i + 1]; j++)
-          {
-              // std::cout << "A at (" << i << "," << col_idxs[j] << "): " << V[j] << std::endl;
-              std::cout << "Now here" << std::endl;
-          }
-      }
-  }
-
   void distribute(MPI_Comm comm) {
     int rank, size; 
     MPI_Comm_rank(comm, &rank);
@@ -161,8 +144,6 @@ public:
     // bcast sends same data: all procs needs to know row pointers 
     MPI_Bcast(row_ptrs.data(), row_ptrs.size(), MPI_INT, 0, MPI_COMM_WORLD);
   }
-
-
 };
 
 // parallel scalar product (u,v) (u and v are distributed)
@@ -296,41 +277,40 @@ int find_int_arg(int argc, char** argv, const char* option, int default_value) {
 
 
 int main(int argc, char* argv[]) {
+  if (find_arg_idx(argc, argv, "-h") >= 0) {
+      std::cout << "-N <int>: side length of the sparse matrix" << std::endl;
+      return 0;
+  }
+
   MPI_Init(&argc, &argv); // Initialize the MPI environment
+
   int size, rank; 
   MPI_Comm_size(MPI_COMM_WORLD, &size); // Get the number of processes
-  std::cout << "number of processes: " << size << std::endl;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank); // Get the rank of the CURRENT process
-    if (find_arg_idx(argc, argv, "-h") >= 0) {
-        std::cout << "-N <int>: side length of the sparse matrix" << std::endl;
-        return 0;
-    }
+  if (rank == 0) std::cout << "number of processes: " << size << std::endl;
 
   int N = find_int_arg(argc, argv, "-N", 100000); // global size // global # rows 
 
   assert(N%size == 0);
   int p = size; // # processes 
   int n = N/size; // number of local row, # rows each process will handle 
-  std::cout << "local N/size: " << n << std::endl;
+  if (rank == 0) std::cout << "N/size: " << n << std::endl;
   // row-distributed matrix
   CSRSpMat A(N, N); // or CSRSpMat A(n, N);
-  // int offset = n*rank; // changing this JP 
   int offset = rank*n; // start row index for CURRENT process changed by JP 
   std::cout << "offset: " << offset << std::endl;
   // local rows of the 1D Laplacian matrix; local column indices start at -1 for rank > 0
-  // JP: insert entries keeping in mind global indicies 
   for (int i=0; i<n; i++) {
-    int global_row = offset+1;  // ex. N=100 and p=4, then each p has N/4 = 25 rows 
-    A.insert(i, global_row, 2.0);
-    if (global_row + i - 1 >= 0) A.insert(i,global_row - 1, -1.0); // insert if wihtin local p 
-    if (global_row + i + 1 < N)  A.insert(i,global_row + 1, -1.0);
-    if (global_row + i + N < N) A.insert(i, global_row + N, -1.0);
-    if (global_row + i - N >= 0) A.insert(i, global_row - N, -1.0);
+    int global_row = offset + i;  // ex. N=100 and p=4, then each p has N/4 = 25 rows 
+    A.insert(global_row, global_row, 2.0);
+    if (global_row - 1 >= 0) A.insert(global_row,global_row - 1, -1.0); // insert if wihtin local p 
+    if (global_row + 1 < N)  A.insert(global_row,global_row + 1, -1.0);
+    // if (global_row + i + N < N) A.insert(global_row, global_row + N, -1.0);
+    // if (global_row + i - N >= 0) A.insert(global_row, global_row - N, -1.0);
   }
-  A.distribute(MPI_COMM_WORLD);
-  std::cout << "rank " << rank << " has rows from " << offset << " to " << offset + n - 1 << std::endl;
-  // std::cout << "Starting A:" << std::endl;
-  // A.display();
+  // A.distribute(MPI_COMM_WORLD);
+  // std::cout << "rank " << rank << " has rows from " << offset << " to " << offset + n - 1 << std::endl;
+  if (rank == 2) A.display();
 
   // Code to uncomment once insertion is fully tested and understood
 
