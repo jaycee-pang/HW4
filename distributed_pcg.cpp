@@ -1,264 +1,342 @@
 #include <cmath>
 #include <iostream>
+#include <map>
 #include <vector>
 #include <cassert>
 #include <mpi.h>
+#include <numeric>
+
 #include <Eigen/Sparse>
 
-typedef Eigen::SparseMatrix<double> SpMat; // Column-major sparse matrix type of double
+typedef Eigen::SparseMatrix<double> SpMat; // declares a column-major sparse matrix type of double
 typedef Eigen::Triplet<double> T;
 
-// Compressed Sparse Row (CSR) Matrix Class
 class CSRSpMat {
 public:
-    int rows, cols; // Dimensions of the matrix
-    std::vector<double> V; // Non-zero values
-    std::vector<int> col_idxs; // Column indices for non-zero values
-    std::vector<int> row_ptrs; // Row pointers (indices in V where each row starts)
+  int rows, cols; // m=num rows, n = num columns 
+  std::vector<double> V; // nonzero values. size (num nonzeros) can call this 'data'
+  std::vector<int> col_idxs; // column idx of nonzeros, size num nonzeros
+  std::vector<int> row_ptrs; // length num rows + 1. It is the index in V where the row starts 
 
-    // Constructor
-    CSRSpMat(int nr, int nc) : rows(nr), cols(nc) {
-        row_ptrs.resize(nr + 1, 0);
+public:
+  CSRSpMat(const int& nr, const int& nc):
+    rows(nr), cols(nc) {row_ptrs.resize(nr + 1, 0);};
+
+  CSRSpMat(const CSRSpMat& m): 
+    rows(m.mrows()), cols(m.ncols()), V(m.V), col_idxs(m.col_idxs), row_ptrs(m.row_ptrs) {}; 
+
+  CSRSpMat& operator=(const CSRSpMat& m){ 
+    if(this!=&m){
+      rows=m.rows;
+      cols=m.cols;
+      V = m.V; 
+      col_idxs = m.col_idxs; 
+      row_ptrs = m.row_ptrs; 
+
+    }   
+    return *this; 
+  }
+
+  int mrows() const {return rows;} // rows is not private so we could maybe delete these accessor functions or make rows private
+  int ncols() const {return cols;}
+  std::vector<int> col_idxs_data() const {return col_idxs;}
+  std::vector<int> row_ptrs_data() const {return row_ptrs;}
+  std::vector<double> V_data() const {return V;}
+
+  void insert(int i, int j, double val) {
+    if (val != 0.0) {
+        V.push_back(val);
+        col_idxs.push_back(j);
+        // row_ptrs[i+1]++; // need to increment for the next row 
+        for (int r =i+1; r<rows+1; ++r) {
+            row_ptrs[r]++;
+        }
     }
+  }
 
-    // Insert a non-zero value into the matrix
-    void insert(int i, int j, double val) {
-        if (val != 0.0) {
-            V.push_back(val);
-            col_idxs.push_back(j);
-            for (int r = i + 1; r <= rows; ++r) {
-                row_ptrs[r]++;
+  double operator()(const int& j, const int& k) const {
+    int start = row_ptrs[j];
+    int end = row_ptrs[j+ 1];
+    for (int i = start; i < end; i++) {
+        if (col_idxs[i] == k) {
+            return V[i];
+        }
+    }
+    return 0.0;
+
+  }
+
+  void display() const{
+    // std::cout << "nonzeros: " << V.size() << std::endl;
+    // std::cout << "rows: " << rows << std::endl; 
+    // std::cout << "row_ptrs size: " << row_ptrs.size() << std::endl;
+    // std::cout << "cols " << cols << std::endl;
+    // std::cout << "col idxs size: " << col_idxs.size() << std::endl;
+    int idx = 0; 
+    for (int i = 0; i<rows; i++) {
+        for (int j=0; j<cols;j++) {
+            if (idx < row_ptrs[i+1] && col_idxs[idx]==j) {
+              // if current col is column index at idx , found the nonzero to print 
+              std::cout << V[idx] << "\t";
+              idx++;
+            } 
+            else {
+              std::cout << "0\t";
             }
         }
+        std::cout << std::endl;
     }
 
-    // Function to distribute matrix data across MPI processes
-    void distribute(MPI_Comm comm, std::vector<double>& local_V, std::vector<int>& local_col_idxs, std::vector<int>& local_row_ptrs) {
-        int rank, size;
-        MPI_Comm_rank(comm, &rank);
-        MPI_Comm_size(comm, &size);
+  
+  }
+  
 
-        int local_rows = rows / size; // Number of rows per process
-        int extra = rows % size;
-        int start_row = rank < extra ? (local_rows + 1) * rank : local_rows * rank + extra;
-        int end_row = start_row + (rank < extra ? local_rows + 1 : local_rows);
+  
 
-        int start_index = row_ptrs[start_row]; // Start index in V for the local rows
-        int end_index = row_ptrs[end_row];     // End index in V for the local rows
-
-        // Resize local structures to hold the distributed parts of the matrix
-        local_row_ptrs.resize(end_row - start_row + 1);
-        local_V.assign(V.begin() + start_index, V.begin() + end_index);
-        local_col_idxs.assign(col_idxs.begin() + start_index, col_idxs.begin() + end_index);
-
-        // Adjust local row pointers
-        int offset = local_row_ptrs[0];
-        for (int &ptr : local_row_ptrs) {
-            ptr -= offset;
-        }
+  // parallel matrix-vector product with distributed vector xi
+  std::vector<double> operator*(const std::vector<double>& xi) const {
+    std::vector<double> local_result(row_ptrs.size() - 1, 0.0); 
+    for (int i=0; i < rows; i++) {
+      for (int k=row_ptrs[i]; k < row_ptrs[i+1]; k++) {
+        local_result[i] += V[k] * xi[col_idxs[k]];
+      }
     }
+    std::vector<double> result(rows);
+    MPI_Allreduce(local_result.data(), result.data(), rows, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD); 
+    return result;
+  }
 
-    // Matrix-vector multiplication (parallel)
-    std::vector<double> multiply(const std::vector<double>& xi) const {
-        std::vector<double> result(rows, 0.0);
-        for (int i = 0; i < rows; i++) {
-            for (int k = row_ptrs[i]; k < row_ptrs[i + 1]; k++) {
-                result[i] += V[k] * xi[col_idxs[k]];
-            }
-        }
-        return result;
+  std::vector<double> serial_mult(const std::vector<double>& xi) const {
+    // CSR format has length m+1 (last element is NNZ) from wikipedia pg on CSR 
+    std::vector<double> result(row_ptrs.size() - 1, 0.0); 
+    // loop over rows, for each row, do nonzeros 
+    for (int i=0; i < rows; i++) {
+      // this is k=row_ptrs[i] to row_ptrs[i+1] - 1
+      for (int k=row_ptrs[i]; k < row_ptrs[i+1]; k++) {
+        result[i] += V[k] * xi[col_idxs[k]]; // k index into V and col_idx is aligned for these 2 vectors
+        // k will index into the values list because row_ptrs holds the indices of the values in V in each row 
+      }
     }
+    return result; 
+
+  }
+
+  void print()
+  {
+    std::cout << "Rows: " << rows << std::endl;
+    std::cout << "Cols: " << cols << std::endl;
+    std::cout << "num_values: " << V.size() << std::endl;
+    std::cout << "First col_idx: " << col_idxs[0] << std::endl;
+    std::cout << "row_ptrs.size(): " << row_ptrs.size() << std::endl;
+
+      for (int i = 0; i < row_ptrs.size() - 1; i++)  // Ensure we don't go out of bounds
+      {
+        std::cout << "row_ptr at i = " << i << " = " << row_ptrs[i] << std::endl;
+          for (int j = row_ptrs[i]; j < row_ptrs[i+1]; j++)
+          {
+              // std::cout << "A at (" << i << "," << col_idxs[j] << "): " << V[j] << std::endl;
+              std::cout << "Now here" << std::endl;
+          }
+      }
+  }
+
+
 };
 
-// Parallel scalar product using MPI
-double parallel_dot(const std::vector<double>& u, const std::vector<double>& v, MPI_Comm comm) {
-    assert(u.size() == v.size());
-    double local_dot = 0.0, global_dot = 0.0;
-    for (size_t i = 0; i < u.size(); ++i) {
-        local_dot += u[i] * v[i];
-    }
-    MPI_Allreduce(&local_dot, &global_dot, 1, MPI_DOUBLE, MPI_SUM, comm);
-    return global_dot;
+// parallel scalar product (u,v) (u and v are distributed)
+double operator,(const std::vector<double>& u, const std::vector<double>& v){ 
+  assert(u.size()==v.size());
+  double sp=0.;
+  for(int j=0; j<u.size(); j++){sp+=u[j]*v[j];}
+
+  return sp; 
 }
 
-// Norm of a vector (parallel)
-double parallel_norm(const std::vector<double>& u, MPI_Comm comm) {
-    return std::sqrt(parallel_dot(u, u, comm));
+// norm of a vector u
+double Norm(const std::vector<double>& u) { 
+  return sqrt((u,u));
 }
 
-// Conjugate Gradient Solver
-void parallel_CG(const CSRSpMat& A, const std::vector<double>& b, std::vector<double>& x, double tol, MPI_Comm comm) {
-    int rank;
-    MPI_Comm_rank(comm, &rank);
+// addition of two vectors u+v
+std::vector<double> operator+(const std::vector<double>& u, const std::vector<double>& v){ 
+  assert(u.size()==v.size());
+  std::vector<double> w=u;
+  for(int j=0; j<u.size(); j++){w[j]+=v[j];}
+  return w;
+}
 
-    std::vector<double> r = b;     // Residual vector
-    std::vector<double> p = r;     // Search direction
-    std::vector<double> Ap;        // A*p vector
-    double alpha, beta, rnorm, pAp;
+// multiplication of a vector by a scalar a*u
+std::vector<double> operator*(const double& a, const std::vector<double>& u){ 
+  std::vector<double> w(u.size());
+  for(int j=0; j<w.size(); j++){w[j]=a*u[j];}
+  return w;
+}
 
-    double rnorm_old = parallel_dot(r, r, comm);
-    if (rank == 0) std::cout << "Initial residual norm: " << std::sqrt(rnorm_old) << std::endl;
+// addition assignment operator, add v to u
+void operator+=(std::vector<double>& u, const std::vector<double>& v){ 
+  assert(u.size()==v.size());
+  for(int j=0; j<u.size(); j++){u[j]+=v[j];}
+}
 
-    int iter = 0;
-    while (true) {
-        Ap = A.multiply(p);
-        pAp = parallel_dot(p, Ap, comm);
-        alpha = rnorm_old / pAp;
+/* block Jacobi preconditioner: perform forward and backward substitution
+   using the Cholesky factorization of the local diagonal block computed by Eigen */
+std::vector<double> prec(const Eigen::SimplicialCholesky<Eigen::SparseMatrix<double>>& P, const std::vector<double>& u){
+  Eigen::VectorXd b(u.size());
+  for (int i=0; i<u.size(); i++) b[i] = u[i];
+  Eigen::VectorXd xe = P.solve(b); // solves Px=b (=xe)
+  std::vector<double> x(u.size());
+  for (int i=0; i<u.size(); i++) x[i] = xe[i];
+  return x;
+}
 
-        if (pAp == 0) {
-        if (rank == 0) std::cerr << "Error: Division by zero in calculating alpha (pAp is zero)." << std::endl;
-        break;
-        }   
+// distributed conjugate gradient
+void CG(const CSRSpMat& A,
+        const std::vector<double>& b,
+        std::vector<double>& x,
+        double tol=1e-6) {
+
+  assert(b.size() == A.mrows());
+  x.resize(b.size(),0.0);
+
+  int rank;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank); // Get the rank of the process
+
+  int n = A.mrows();
+
+  // get the local diagonal block of A
+  std::vector<Eigen::Triplet<double>> coefficients;
+  for (int i=0; i < n; i++) {
+    for (int k=A.row_ptrs[i]; k <A.row_ptrs[i+1]; k++) {
+      int j = A.col_idxs[k]; 
+      if (j>= 0 && j < n) coefficients.push_back(Eigen::Triplet<double>(i,j,A.V[k])); 
+    }
+  }
+
+  // compute the Cholesky factorization of the diagonal block for the preconditioner
+  Eigen::SparseMatrix<double> B(n,n);
+  B.setFromTriplets(coefficients.begin(), coefficients.end());
+  Eigen::SimplicialCholesky<Eigen::SparseMatrix<double>> P(B);
 
 
-        // Update x and r
-        for (size_t i = 0; i < x.size(); ++i) {
-            x[i] += alpha * p[i];
-            r[i] -= alpha * Ap[i];
-        }
+  std::vector<double> r=b, z=prec(P,r), p=z, Ap=A*p;
+  double np2=(p,Ap), alpha=0.,beta=0.;
+  double nr = sqrt((z,r));
 
-        double rnorm_new = parallel_dot(r, r, comm);
-        if (std::sqrt(rnorm_new) < tol) break; // Convergence check
+  std::vector<double> res = A*x;
+  res += (-1)*b;
 
-        beta = rnorm_new / rnorm_old;
-        for (size_t i = 0; i < p.size(); ++i) {
-            p[i] = r[i] + beta * p[i];
-        }
+  
+  double rres = sqrt((res,res));
 
-        rnorm_old = rnorm_new;
-        if (rank == 0) {
-            std::cout << "Iteration " << ++iter << ": Residual norm = " << std::sqrt(rnorm_new) << std::endl;
+  int num_it = 0;
+  while(rres>1e-5) {
+    alpha = (nr*nr)/(np2);
+    x += (+alpha)*p; 
+    r += (-alpha)*Ap;
+    z = prec(P,r);
+    nr = sqrt((z,r));
+    beta = (nr*nr)/(alpha*np2); 
+    p = z+beta*p;    
+    Ap=A*p;
+    np2=(p,Ap);
+
+    rres = sqrt((r,r));
+
+    num_it++;
+    if(rank == 0 && !(num_it%1)) {
+      std::cout << "iteration: " << num_it << "\t";
+      std::cout << "residual:  " << rres     << "\n";
+    }
+  }
+}
+
+// Command Line Option Processing
+int find_arg_idx(int argc, char** argv, const char* option) {
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], option) == 0) {
+            return i;
         }
     }
+    return -1;
+}
 
-    if (rank == 0) {
-        std::cout << "Conjugate Gradient completed after " << iter << " iterations." << std::endl;
+int find_int_arg(int argc, char** argv, const char* option, int default_value) {
+    int iplace = find_arg_idx(argc, argv, option);
+
+    if (iplace >= 0 && iplace < argc - 1) {
+        return std::stoi(argv[iplace + 1]);
     }
 
     return default_value;
 }
 
-void testCSRMatrixAndCGSolver(MPI_Comm comm) {
-    int rank, size;
-    MPI_Comm_rank(comm, &rank);
-    MPI_Comm_size(comm, &size);
-
-    int N = 1000; // Example size of the matrix, should be divisible by 'size'
-    assert(N % size == 0); // Ensure N is evenly divisible by the number of processes
-
-    int local_rows = N / size; // Number of rows per process
-    int offset = rank * local_rows; // Starting row index for this process
-
-    CSRSpMat A(local_rows, N); // Local part of the CSR matrix of size local_rows x N
-
-    // Initialize matrix A
-    for (int i = 0; i < local_rows; i++) {
-        int global_row = i + offset; // Convert local row index to global row index
-        A.insert(i, global_row, 2.0); // Diagonal dominance
-        if (global_row > 0) A.insert(i, global_row - 1, -1.0); // Sub-diagonal
-        if (global_row < N - 1) A.insert(i, global_row + 1, -1.0); // Super-diagonal
-    }
-
-    std::vector<double> b(local_rows, 1.0); // Right-hand side vector initialized to all ones
-    std::vector<double> x(local_rows, 0.0); // Solution vector initialized to zero
-
-    // Call the Conjugate Gradient function
-    double tol = 1e-6; // Tolerance for the CG solver
-    CG(A, b, x, tol);
-
-    // Optionally, print the results
-    if (rank == 0) {
-        std::cout << "Test completed. Solution vector x[0]: " << x[0] << std::endl;
-    }
-}
 
 int main(int argc, char* argv[]) {
-    MPI_Init(&argc, &argv);
-    MPI_Comm comm = MPI_COMM_WORLD;
-
-    // Determine the rank of the process
-    int rank;
-    MPI_Comm_rank(comm, &rank);
-
-    if (argc > 1 && std::string(argv[1]) == "--test") {
-        // Run tests only if a specific command line argument is provided
-        testCSRMatrixAndCGSolver(comm);
-    } else {
-        // Regular execution path
-        int N = find_int_arg(argc, argv, "-N", 10000); // Default to a size of 10,000 if not specified
-        if (rank == 0) {
-            std::cout << "Solving a system with matrix size " << N << "x" << N << std::endl;
-        }
-        CSRSpMat A(N, N); // Example matrix initialization
-        std::vector<double> b(N, 1.0), x(N, 0.0);
-        CG(A, b, x, 1e-6);
+  MPI_Init(&argc, &argv); // Initialize the MPI environment
+  int size, rank; 
+  MPI_Comm_size(MPI_COMM_WORLD, &size); // Get the number of processes
+  std::cout << "number of processes: " << size << std::endl;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank); // Get the rank of the CURRENT process
+    if (find_arg_idx(argc, argv, "-h") >= 0) {
+        std::cout << "-N <int>: side length of the sparse matrix" << std::endl;
+        return 0;
     }
 
-    MPI_Finalize();
-    return 0;
+  int N = find_int_arg(argc, argv, "-N", 100000); // global size // global # rows 
+
+  assert(N%size == 0);
+  int p = size; // # processes 
+  int n = N/size; // number of local row, # rows each process will handle 
+  std::cout << "local N/size: " << n << std::endl;
+
+  // CSRSpMat A(N, N); // or 
+  CSRSpMat A(n, N);
+
+  int offset = rank*n; // start row index for CURRENT process changed by JP 
+  std::cout << "offset: " << offset << std::endl;
+  // local rows of the 1D Laplacian matrix; local column indices start at -1 for rank > 0
+  // JP: insert entries keeping in mind global indicies 
+  for (int i=0; i<n; i++) {
+ 
+    int global_row = offset + i;
+    for (int j = -1; j <= 1; j++) {
+        int col_idx = global_row + j;
+        if (col_idx >= 0 && col_idx < N) {
+            if (col_idx == global_row) {
+                // Diagonal element
+                A.insert(i, col_idx, 2.0);
+            } else {
+                // Neighboring elements
+                A.insert(i, col_idx, -1.0);
+            }
+        }
+    }
+  }
+  std::cout << "Rank " << rank << " has rows from " << offset << " to " << offset + n - 1 << std::endl;
+  // std::cout << "Starting A:" << std::endl;
+  A.display();
+
+  // initial guess
+  std::vector<double> x(n,0);
+
+  // // right-hand side
+  std::vector<double> b(n,1);
+
+  MPI_Barrier(MPI_COMM_WORLD);
+  double time = MPI_Wtime();
+
+  CG(A,b,x);
+
+  MPI_Barrier(MPI_COMM_WORLD);
+  if (rank == 0) std::cout << "wall time for CG: " << MPI_Wtime()-time << std::endl;
+
+  std::vector<double> r = A*x + (-1)*b;
+
+  double err = Norm(r)/Norm(b);
+  if (rank == 0) std::cout << "|Ax-b|/|b| = " << err << std::endl;
+
+
+  MPI_Finalize(); // Finalize the MPI environment
+
+  return 0;
 }
-
-
-// int main(int argc, char* argv[]) {
-
-//   MPI_Init(&argc, &argv); // Initialize the MPI environment
-//   int size, rank; 
-//   MPI_Comm_size(MPI_COMM_WORLD, &size); // Get the number of processes
-//   std::cout << "number of processes: " << size << std::endl;
-//   MPI_Comm_rank(MPI_COMM_WORLD, &rank); // Get the rank of the CURRENT process
-//     if (find_arg_idx(argc, argv, "-h") >= 0) {
-//         std::cout << "-N <int>: side length of the sparse matrix" << std::endl;
-//         return 0;
-//     }
-
-//   int N = find_int_arg(argc, argv, "-N", 100000); // global size // global # rows 
-
-//   assert(N%size == 0);
-//   int p = size; // # processes 
-//   int n = N/size; // number of local row, # rows each process will handle 
-//   std::cout << "local N/size: " << n << std::endl;
-
-//   // CSRSpMat A(N, N); // or 
-//   CSRSpMat A(n, N);
-
-//   int offset = rank*n; // start row index for CURRENT process changed by JP 
-//   std::cout << "offset: " << offset << std::endl;
-//   // local rows of the 1D Laplacian matrix; local column indices start at -1 for rank > 0
-//   // JP: insert entries keeping in mind global indicies 
-//   for (int i=0; i<n; i++) {
-//     int global_row = offset+1;  // ex. N=100 and p=4, then each p has N/4 = 25 rows 
-//     A.insert(i, i, 2.0);
-//     if (offset + i - 1 >= 0) A.insert(i, i - 1, -1.0);  
-//     if (offset + i + 1 < N) A.insert(i, i + 1, -1.0);  
-//     if (offset + i + N < N) A.insert(i, i + N, -1.0);  
-//     if (offset + i - N >= 0) A.insert(i, i - N, -1.0);  
-//   }
-//   std::cout << "Rank " << rank << " has rows from " << offset << " to " << offset + n - 1 << std::endl;
-//   // std::cout << "Starting A:" << std::endl;
-//   // A.display();
-
-//   // // initial guess
-//   std::vector<double> x(n,0);
-
-//   // // right-hand side
-//   std::vector<double> b(n,1);
-
-//   MPI_Barrier(MPI_COMM_WORLD);
-//   double time = MPI_Wtime();
-
-//   CG(A,b,x);
-
-//   MPI_Barrier(MPI_COMM_WORLD);
-//   if (rank == 0) std::cout << "wall time for CG: " << MPI_Wtime()-time << std::endl;
-
-//   std::vector<double> r = A*x + (-1)*b;
-
-//   double err = Norm(r)/Norm(b);
-//   if (rank == 0) std::cout << "|Ax-b|/|b| = " << err << std::endl;
-
-
-//   MPI_Finalize(); // Finalize the MPI environment
-
-//   return 0;
-// }
-
