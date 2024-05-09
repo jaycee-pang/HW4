@@ -99,11 +99,13 @@ public:
     for (int i=0; i < rows; i++) {
       for (int k=row_ptrs[i]; k < row_ptrs[i+1]; k++) {
         local_result[i] += V[k] * xi[col_idxs[k]];
+        // std::cout <<"local_result " <<"at i: " << i<<": "<< local_result[i] << std::endl;
       }
     }
     std::vector<double> result(rows);
     MPI_Allreduce(local_result.data(), result.data(), rows, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD); 
     return result;
+   
   }
 
   std::vector<double> serial_mult(const std::vector<double>& xi) const {
@@ -121,24 +123,6 @@ public:
 
   }
 
-  void print()
-  {
-    std::cout << "Rows: " << rows << std::endl;
-    std::cout << "Cols: " << cols << std::endl;
-    std::cout << "num_values: " << V.size() << std::endl;
-    std::cout << "First col_idx: " << col_idxs[0] << std::endl;
-    std::cout << "row_ptrs.size(): " << row_ptrs.size() << std::endl;
-
-      for (int i = 0; i < row_ptrs.size() - 1; i++)  // Ensure we don't go out of bounds
-      {
-        std::cout << "row_ptr at i = " << i << " = " << row_ptrs[i] << std::endl;
-          for (int j = row_ptrs[i]; j < row_ptrs[i+1]; j++)
-          {
-              // std::cout << "A at (" << i << "," << col_idxs[j] << "): " << V[j] << std::endl;
-              std::cout << "Now here" << std::endl;
-          }
-      }
-  }
 
 
 };
@@ -196,7 +180,7 @@ void CG(const CSRSpMat& A,
         double tol=1e-6) {
 
   assert(b.size() == A.mrows());
-  x.resize(b.size(),0.0);
+  x.resize(b.size(),0.0); 
 
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank); // Get the rank of the process
@@ -205,18 +189,19 @@ void CG(const CSRSpMat& A,
 
   // get the local diagonal block of A
   std::vector<Eigen::Triplet<double>> coefficients;
+
   for (int i=0; i < n; i++) {
     for (int k=A.row_ptrs[i]; k <A.row_ptrs[i+1]; k++) {
       int j = A.col_idxs[k]; 
       if (j>= 0 && j < n) coefficients.push_back(Eigen::Triplet<double>(i,j,A.V[k])); 
     }
   }
+ 
 
   // compute the Cholesky factorization of the diagonal block for the preconditioner
-  Eigen::SparseMatrix<double> B(n,n);
+  Eigen::SparseMatrix<double> B(n,n); 
   B.setFromTriplets(coefficients.begin(), coefficients.end());
   Eigen::SimplicialCholesky<Eigen::SparseMatrix<double>> P(B);
-
 
   std::vector<double> r=b, z=prec(P,r), p=z, Ap=A*p;
   double np2=(p,Ap), alpha=0.,beta=0.;
@@ -224,7 +209,6 @@ void CG(const CSRSpMat& A,
 
   std::vector<double> res = A*x;
   res += (-1)*b;
-
   
   double rres = sqrt((res,res));
 
@@ -284,7 +268,7 @@ int main(int argc, char* argv[]) {
 
   int N = find_int_arg(argc, argv, "-N", 100000); // global size // global # rows 
 
-  assert(N%size == 0);
+  assert(N%size == 0); 
   int p = size; // # processes 
   int n = N/size; // number of local row, # rows each process will handle 
   std::cout << "local N/size: " << n << std::endl;
@@ -297,30 +281,43 @@ int main(int argc, char* argv[]) {
   // local rows of the 1D Laplacian matrix; local column indices start at -1 for rank > 0
   // JP: insert entries keeping in mind global indicies 
   for (int i=0; i<n; i++) {
- 
-    int global_row = offset + i;
-    for (int j = -1; j <= 1; j++) {
-        int col_idx = global_row + j;
-        if (col_idx >= 0 && col_idx < N) {
-            if (col_idx == global_row) {
-                // Diagonal element
-                A.insert(i, col_idx, 2.0);
-            } else {
-                // Neighboring elements
-                A.insert(i, col_idx, -1.0);
-            }
-        }
-    }
+    int global_row = offset+1;  // ex. N=100 and p=4, then each p has N/4 = 25 rows 
+    A.insert(i, i, 2.0);
+    if (offset + i - 1 >= 0) A.insert(i, i - 1, -1.0);  
+    if (offset + i + 1 < N) A.insert(i, i + 1, -1.0);  
+    if (offset + i + N < N) A.insert(i, i + N, -1.0);  
+    if (offset + i - N >= 0) A.insert(i, i - N, -1.0);  
+    // correct laplacian 
+    // int global_row = offset + i;
+    // for (int j = -1; j <= 1; j++) {
+    //     int col_idx = global_row + j;
+    //     if (col_idx >= 0 && col_idx < N) {
+    //         if (col_idx == global_row) {
+    //             // Diagonal element
+    //             A.insert(i, col_idx, 2.0);
+    //         } else {
+    //             // Neighboring elements
+    //             A.insert(i, col_idx, -1.0);
+    //         }
+    //     }
+    // }
   }
   std::cout << "Rank " << rank << " has rows from " << offset << " to " << offset + n - 1 << std::endl;
   // std::cout << "Starting A:" << std::endl;
-  A.display();
+  // A.display();
 
   // initial guess
   std::vector<double> x(n,0);
 
   // // right-hand side
   std::vector<double> b(n,1);
+  // std::vector<double> vec(2,2.0); 
+  // std::vector<double>result = A*vec; 
+  // for (const double& val:result) {
+  //   std::cout << "[" << val << "]" << std::endl;
+  // }
+
+
 
   MPI_Barrier(MPI_COMM_WORLD);
   double time = MPI_Wtime();
@@ -340,4 +337,6 @@ int main(int argc, char* argv[]) {
 
   return 0;
 }
+
+
 
