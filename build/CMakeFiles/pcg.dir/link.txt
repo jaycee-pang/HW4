@@ -1,1 +1,0 @@
-/opt/cray/pe/craype/2.7.30/bin/CC -Wl,-rpath -Wl,/global/common/software/nersc/pe/gpu/gnu/openmpi/5.0.0/lib -Wl,--enable-new-dtags CMakeFiles/pcg.dir/distributed_pcg.cpp.o -o pcg  -Wl,-rpath,/global/common/software/nersc/pe/gpu/gnu/openmpi/5.0.0/lib /global/common/software/nersc/pe/gpu/gnu/openmpi/5.0.0/lib/libmpi.so 
